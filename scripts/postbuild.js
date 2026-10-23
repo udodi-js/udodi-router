@@ -28,10 +28,8 @@ const FILES_TO_COPY = [
 	{ src: "types/index.d.ts", dest: "index.d.ts" },
 	{ src: "types/server.d.ts", dest: "server.d.ts" },
 
-	// Optional docs next to the build (only if you publish from dist/)
-	// Prefer listing these in package.json "files" from the repo root instead.
-	// { src: "README.md", dest: "README.md" },
-	// { src: "LICENSE", dest: "LICENSE" },
+	{ src: "README.md", dest: "README.md" },
+	{ src: "LICENSE", dest: "LICENSE" },
 ];
 
 const REQUIRED_PACKAGE_FIELDS = [
@@ -74,7 +72,7 @@ async function ensureDir(dir) {
 }
 
 async function copyFiles() {
-	console.log("📦 Copying distribution files…");
+	console.log("Copying distribution files...");
 
 	for (const { src, dest } of FILES_TO_COPY) {
 		const from = join(ROOT, src);
@@ -92,7 +90,7 @@ async function copyFiles() {
 }
 
 async function verifyPackageJson() {
-	console.log("🔍 Verifying package.json fields…");
+	console.log("Verifying package.json fields...");
 
 	const pkgPath = join(ROOT, "package.json");
 	const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
@@ -232,7 +230,7 @@ async function validateEntryDeclarations(label, jsPath, dtsPath) {
 }
 
 async function validateExportsHaveDeclarations() {
-	console.log("🔎 Validating exports have declarations…");
+	console.log("Validating exports have declarations...");
 
 	for (const { entry, js, dts } of PUBLIC_ENTRIES) {
 		await validateEntryDeclarations(
