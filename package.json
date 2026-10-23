@@ -1,6 +1,6 @@
 {
   "name": "udodi-router",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Optional, lightweight router for Udodi applications with client navigation and server-side metadata support for SEO",
   "keywords": [
     "udodi",
@@ -23,26 +23,27 @@
   "author": "Attamah Celestine .C",
   "type": "module",
   "sideEffects": false,
-
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-
+  "jsdelivr": "./dist/index.global.js",
+  "unpkg": "./dist/index.global.js",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./server": {
-      "import": "./dist/server.js",
-      "types": "./dist/server.d.ts"
-    }
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
   },
-
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
-
   "scripts": {
     "build": "tsup && node scripts/postbuild.js",
     "dev": "tsup --watch",
@@ -53,11 +54,9 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-
   "peerDependencies": {
     "udodi": "^1.1.4"
   },
-
   "devDependencies": {
     "@vitest/ui": "^5.0.5",
     "happy-dom": "^21.0.3",

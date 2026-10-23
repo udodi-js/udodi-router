@@ -203,7 +203,7 @@ export function createViewFactory(
 				try {
 					entry.instance?.unmount();
 				} finally {
-					entry.host.remove();
+					entry.host?.remove();
 					entry.instance = null;
 				}
 			}
@@ -300,6 +300,7 @@ export function createViewFactory(
 						componentFactory(),
 						host,
 					);
+
 				} catch (error) {
 					host.remove();
 					throw error;

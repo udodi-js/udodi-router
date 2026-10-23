@@ -32,7 +32,7 @@ export default defineConfig([
 	{
 		...shared,
 		entry: {
-			"udodi-router": "src/index.js", // browser entry only
+			index: "src/index.js", // browser entry only
 		},
 		format: ["iife"],
 		globalName: "UdodiRouter",
