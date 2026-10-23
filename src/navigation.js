@@ -1,4 +1,3 @@
-
 /**
  * @fileoverview Core navigation engine for Udodi Router.
  *
@@ -17,6 +16,8 @@ import { createMatcher } from "./matcher.js";
 import { createWebHistory } from "./history.js";
 import { createLinkFactory } from "./links.js";
 import { createViewFactory } from "./view.js";
+import { createHeadManager } from "./head.js";
+import { normalizeMeta, resolveMeta } from "./meta.js";
 
 /**
  * @typedef {import("./matcher.js").RouteRecord} RouteRecord
@@ -50,21 +51,38 @@ import { createViewFactory } from "./view.js";
  */
 
 /**
+ * @typedef {Object} ScrollBehaviorResult
+ * @property {number} [top]
+ *   Absolute vertical scroll position in pixels, unless `el` is supplied,
+ *   in which case it is the offset from the element's document position
+ *   (useful for fixed headers).
+ * @property {number} [left] Horizontal scroll position in pixels.
+ * @property {string} [el] CSS selector for an element to scroll to.
+ */
+
+/**
  * @typedef {Object} RouterOptions
  * @property {RouteRecord[]} routes
  * @property {HistoryAdapter} [history]
  * @property {string} [base]
- * @property {number} [maxKeepAlive=10] Maximum inactive route views retained per RouterView outlet.
- * @property {(to: RouteState, from: RouteState|null, savedPosition: {top:number,left:number}|null) => ScrollBehaviorResult|false|void|Promise<ScrollBehaviorResult|false|void>} [scrollBehavior] Callback that controls window scrolling after navigation.
+ * @property {number} [maxKeepAlive=10]
+ *   Maximum inactive route views retained per RouterView outlet.
+ * @property {(
+ *   to: RouteState,
+ *   from: RouteState|null,
+ *   savedPosition: {top: number, left: number}|null
+ * ) => ScrollBehaviorResult|false|null|void|Promise<ScrollBehaviorResult|false|null|void>} [scrollBehavior]
+ *   Callback that controls window scrolling after a successful navigation.
  */
 
 /**
- * @typedef {Object} ScrollBehaviorResult
- * @property {number} [top] Absolute vertical scroll position in pixels, unless
- *   `el` is supplied, in which case it is the offset from the element's
- *   document position (useful for fixed headers).
- * @property {number} [left] Horizontal scroll position in pixels.
- * @property {string} [el] CSS selector for an element to scroll to.
+ * @typedef {"initial"|"push"|"replace"|"traverse"|"none"} HistoryAction
+ */
+
+/**
+ * @typedef {Object} ScrollSnapshot
+ * @property {string} key History-entry key the coordinates belong to.
+ * @property {{top: number, left: number}} position Window scroll coordinates.
  */
 
 /**
@@ -87,7 +105,10 @@ import { createViewFactory } from "./view.js";
 function normalizePathname(pathname) {
 	let path = pathname || "/";
 
-	if (!path.startsWith("/")) path = `/${path}`;
+	if (!path.startsWith("/")) {
+		path = `/${path}`;
+	}
+
 	path = path.replace(/\/{2,}/g, "/");
 
 	if (path.length > 1 && path.endsWith("/")) {
@@ -109,7 +130,9 @@ function parseQuery(search) {
 	/** @type {Object<string, string>} */
 	const query = Object.create(null);
 
-	if (!search || search === "?") return query;
+	if (!search || search === "?") {
+		return query;
+	}
 
 	const params = new URLSearchParams(
 		search.startsWith("?") ? search.slice(1) : search,
@@ -125,25 +148,30 @@ function parseQuery(search) {
 /**
  * Serialize a query object.
  *
- * Undefined and null values are omitted. Array values produce repeated
- * query keys.
+ * Undefined and null values are omitted. Array values produce repeated keys.
  *
  * @param {Object<string, *>} query
  * @returns {string}
  */
 function stringifyQuery(query) {
-	if (!query || typeof query !== "object") return "";
+	if (!query || typeof query !== "object") {
+		return "";
+	}
 
 	const params = new URLSearchParams();
 
 	for (const key of Object.keys(query)) {
 		const value = query[key];
 
-		if (value == null) continue;
+		if (value == null) {
+			continue;
+		}
 
 		if (Array.isArray(value)) {
 			for (const item of value) {
-				if (item != null) params.append(key, String(item));
+				if (item != null) {
+					params.append(key, String(item));
+				}
 			}
 		
 		} else {
@@ -170,7 +198,7 @@ function splitLocation(target) {
 		);
 	}
 
-	let value = target || "/";
+	const value = target || "/";
 	let pathname = value;
 	let search = "";
 	let hash = "";
@@ -189,7 +217,9 @@ function splitLocation(target) {
 		pathname = pathname.slice(0, searchIndex);
 	}
 
-	if (!pathname) pathname = "/";
+	if (!pathname) {
+		pathname = "/";
+	}
 
 	if (!pathname.startsWith("/") || pathname.startsWith("//")) {
 		throw new TypeError(
@@ -207,6 +237,7 @@ function splitLocation(target) {
 /**
  * Normalize a navigation target into an application-relative URL.
  *
+ * String targets preserve their query-string representation.
  * Object targets support `path`, optional `query`, and optional `hash`.
  *
  * @param {string|{path: string, query?: Object<string, *>, hash?: string}} to
@@ -268,50 +299,53 @@ function toError(value) {
  * @returns {Error}
  */
 function getAbortError(signal) {
-	if (signal.reason instanceof Error) return signal.reason;
+	if (signal.reason instanceof Error) {
+		return signal.reason;
+	}
 
 	return new DOMException("Navigation aborted.", "AbortError");
 }
 
 /**
- * Resolve metadata from matched parent to child records.
+ * Resolve metadata from matched parent-to-child records.
  *
- * Each metadata callback receives the loader result for its own record.
+ * Uses {@link resolveMeta} so inheritance is parent-chain only (never the
+ * previously committed page). Each callback receives that route's loader data.
+ * Callbacks may be asynchronous.
  *
  * @param {RouteRecord[]} matched
  * @param {Object<string, string>} params
  * @param {Map<RouteRecord, *>} loaderData
  * @param {Object<string, *>} context
+ * @param {Object|Function} [defaults]
  * @returns {Promise<Object<string, *>>}
  */
-async function resolveMetadata(matched, params, loaderData, context) {
-	/** @type {Object<string, *>} */
-	const meta = Object.create(null);
+async function resolveMetadata(
+	matched,
+	params,
+	loaderData,
+	context,
+	defaults,
+) {
+	const wrapped = matched.map((record) => ({
+		record,
+		params,
+		data: loaderData.has(record) ? loaderData.get(record) : null,
+	}));
 
-	for (let i = 0; i < matched.length; i++) {
-		const record = matched[i];
-
-		if (!record.meta) continue;
-
-		const data = loaderData.has(record) ? loaderData.get(record) : null;
-		const values =
-			typeof record.meta === "function"
-				? await record.meta({ params, data, context })
-				: record.meta;
-
-		if (values && typeof values === "object") {
-			Object.assign(meta, values);
-		}
-	}
-
-	return meta;
+	return resolveMeta({
+		defaults,
+		matched: wrapped,
+		context,
+	});
 }
 
 /**
  * Create a router instance.
  *
  * Route preparation runs before the active route is committed. Superseded
- * navigations are cancelled and cannot overwrite a newer committed route.
+ * navigations are cancelled and cannot overwrite a newer committed route or
+ * persist their own scroll snapshots.
  *
  * @param {RouterOptions & {context?: Object<string, *>}} options
  * @returns {object}
@@ -327,8 +361,13 @@ export function createRouter(options) {
 	const ownsHistory = !options.history;
 	const history = options.history || createWebHistory({ base });
 	const match = createMatcher(options.routes, { base });
-	const scrollBehavior = options.scrollBehavior || null;
+	const scrollBehavior = typeof options.scrollBehavior === "function"
+		? options.scrollBehavior
+		: null;
 	const context = options.context || Object.create(null);
+	const metaDefaults = options.meta ?? Object.create(null);
+	/** Head manager is always created; it no-ops when document is unavailable. */
+	const headManager = createHeadManager();
 
 	/** @type {RouteState} */
 	const routeState = reactive({
@@ -363,125 +402,112 @@ export function createRouter(options) {
 	let resolveReady;
 	let viewFactory = null;
 
-	/** Saved scroll positions indexed by individual history-entry keys. */
+	/** @type {Map<string, {top: number, left: number}>} */
 	const savedPositions = new Map();
 	let activeHistoryKey = null;
-	let stopScrollCapture = null;
 	let previousScrollRestoration = null;
-	let scrollFrame = null;
-	const requestFrame = typeof requestAnimationFrame === "function"
-		? requestAnimationFrame
-		: (callback) => setTimeout(callback, 16);
-	const cancelFrame = typeof cancelAnimationFrame === "function"
-		? cancelAnimationFrame
-		: clearTimeout;
 	const MAX_SAVED_POSITIONS = 100;
 
 	/**
-	 * Capture the current document position for the last committed entry.
-	 * Scroll events use activeHistoryKey rather than history.location(),
-	 * because the browser changes its active entry before popstate navigation
-	 * finishes preparing the destination.
+	 * Store a window scroll snapshot for one history-entry key.
 	 *
+	 * Map insertion order is used as a simple LRU eviction order.
+	 *
+	 * @param {string|null|undefined} key
+	 * @param {{top: number, left: number}} position
 	 * @returns {void}
 	 */
 	function storeScrollPosition(key, position) {
-		if (key == null) return;
+		if (key == null) {
+			return;
+		}
+
 		savedPositions.delete(key);
-		savedPositions.set(key, position);
+		savedPositions.set(key, {
+			top: position.top,
+			left: position.left,
+		});
 
 		while (savedPositions.size > MAX_SAVED_POSITIONS) {
 			const oldestKey = savedPositions.keys().next().value;
-			if (oldestKey === undefined) break;
+
+			if (oldestKey === undefined) {
+				break;
+			}
+
 			savedPositions.delete(oldestKey);
 		}
 	}
 
 	/**
-	 * Save the current window position for the last committed history entry.
+	 * Read the current window scroll without writing the saved-position map.
 	 *
-	 * Cancels a queued animation-frame capture first, ensuring that a stale
-	 * snapshot cannot overwrite the outgoing entry after navigation changes
-	 * the active history key.
+	 * @returns {{top: number, left: number}|null}
+	 */
+	function readWindowScrollPosition() {
+		if (typeof window === "undefined") {
+			return null;
+		}
+
+		return {
+			top: window.scrollY ?? window.pageYOffset ?? 0,
+			left: window.scrollX ?? window.pageXOffset ?? 0,
+		};
+	}
+
+	/**
+	 * Persist the current window scroll under `activeHistoryKey`.
+	 *
+	 * Reserved for explicit recovery paths. Ordinary navigations snapshot
+	 * first and only call `storeScrollPosition` after a successful commit.
 	 *
 	 * @returns {void}
 	 */
 	function saveCurrentScrollPosition() {
-		if (scrollFrame !== null) {
-			cancelFrame(scrollFrame);
-			scrollFrame = null;
+		if (activeHistoryKey == null) {
+			return;
 		}
 
-		if (typeof window === "undefined" || activeHistoryKey == null) return;
+		const position = readWindowScrollPosition();
 
-		storeScrollPosition(activeHistoryKey, {
-			top: window.scrollY ?? window.pageYOffset ?? 0,
-			left: window.scrollX ?? window.pageXOffset ?? 0,
-		});
+		if (position) {
+			storeScrollPosition(activeHistoryKey, position);
+		}
 	}
 
 	/**
 	 * Return the saved position for a history entry, if one was captured.
 	 *
 	 * @param {string|null|undefined} key
-	 * @returns {{top:number,left:number}|null}
+	 * @returns {{top: number, left: number}|null}
 	 */
 	function getSavedPosition(key) {
-		if (key == null) return null;
+		if (key == null) {
+			return null;
+		}
+
 		const position = savedPositions.get(key);
-		return position ? { top: position.top, left: position.left } : null;
+
+		return position
+			? { top: position.top, left: position.left }
+			: null;
 	}
 
-	if (typeof window !== "undefined" && typeof scrollBehavior === "function") {
+	if (typeof window !== "undefined" && scrollBehavior) {
 		// Prevent native restoration from racing with the router's callback.
 		if ("scrollRestoration" in window.history) {
 			previousScrollRestoration = window.history.scrollRestoration;
 			window.history.scrollRestoration = "manual";
 		}
-
-		/**
-		 * Coalesce scroll events into one position snapshot per animation frame.
-		 * The committed entry key is captured alongside the coordinates because
-		 * popstate may change the browser's active entry before navigation commits.
-		 *
-		 * @returns {void}
-		 */
-		const onScroll = () => {
-			if (scrollFrame !== null || activeHistoryKey == null) return;
-			// Snapshot both key and coordinates now. The browser can change its
-			// history entry before a queued frame runs during popstate navigation.
-			const key = activeHistoryKey;
-			const position = {
-				top: window.scrollY ?? window.pageYOffset ?? 0,
-				left: window.scrollX ?? window.pageXOffset ?? 0,
-			};
-
-			scrollFrame = requestFrame(() => {
-				scrollFrame = null;
-				storeScrollPosition(key, position);
-			});
-		};
-
-		window.addEventListener("scroll", onScroll, { passive: true });
-
-		stopScrollCapture = () => {
-			window.removeEventListener("scroll", onScroll);
-			if (scrollFrame !== null) {
-				cancelFrame(scrollFrame);
-				scrollFrame = null;
-			}
-		};
 	}
 
-	/** Resolves once, with the result of the initial navigation attempt. */
+	/** Resolves once with the result of the initial navigation attempt. */
 	const ready = new Promise((resolve) => {
 		resolveReady = resolve;
 	});
 
 	/**
 	 * Update the private active-path lookup from the committed route chain.
-	 *
-	 * Matcher records are expected to expose their full normalized paths.
 	 *
 	 * @param {Array<{path: string}>} matched
 	 * @returns {void}
@@ -506,7 +532,6 @@ export function createRouter(options) {
 	/**
 	 * Create public matched-record entries with route-specific loader data.
 	 *
-	 * The matcher is expected to provide full normalized record paths.
 	 * Original route definitions are not mutated.
 	 *
 	 * @param {RouteRecord[]} matched
@@ -531,9 +556,6 @@ export function createRouter(options) {
 
 	/**
 	 * Return the component definition prepared for a committed matched entry.
-	 *
-	 * The matched entry carries the resolved lazy definition. The original
-	 * route record remains the stable key for the component-resolution cache.
 	 *
 	 * @param {object} entry
 	 * @returns {*}
@@ -614,10 +636,12 @@ export function createRouter(options) {
 	 * @returns {void}
 	 */
 	function cancelActiveNavigation() {
-		if (activeAbortController) {
-			activeAbortController.abort();
-			activeAbortController = null;
+		if (!activeAbortController) {
+			return;
 		}
+
+		activeAbortController.abort();
+		activeAbortController = null;
 	}
 
 	/**
@@ -625,6 +649,11 @@ export function createRouter(options) {
 	 *
 	 * Lazy routes use `loadComponent: () => import("./Page.js")`.
 	 * Successful definitions are cached; rejected loads can be retried.
+	 *
+	 * The shared cache holds only the module-load promise. `signal` controls
+	 * whether *this* navigation continues to wait; aborting it does not reject
+	 * or remove the shared load. A later navigation can still adopt the same
+	 * in-flight import.
 	 *
 	 * @param {RouteRecord} record
 	 * @param {AbortSignal} signal
@@ -642,32 +671,33 @@ export function createRouter(options) {
 		let pending = componentCache.get(record);
 
 		if (!pending) {
-			pending = Promise.resolve().then(() => record.loadComponent());
-
-			const componentPromise = pending.then(
-				(loaded) => {
-					const definition =
-						loaded &&
-						(typeof loaded === "object" || typeof loaded === "function") &&
-						"default" in loaded
-							? loaded.default
-							: loaded;
-
-					if (definition == null) {
-						throw new TypeError(
-							`[Udodi Router] Lazy component for "${record.path}" resolved to an empty value.`,
-						);
-					}
-
-					resolvedComponents.set(record, definition);
-					return definition;
-				},
+			// Load is independent of any navigation AbortSignal so concurrent
+			// navigations share one import and an abort never poisons the cache.
+			const loading = Promise.resolve().then(() =>
+				record.loadComponent(),
 			);
 
-			pending = componentPromise;
+			pending = loading.then((loaded) => {
+				const definition =
+					loaded &&
+					(typeof loaded === "object" || typeof loaded === "function") &&
+					"default" in loaded
+						? loaded.default
+						: loaded;
+
+				if (definition == null) {
+					throw new TypeError(
+						`[Udodi Router] Lazy component for "${record.path}" resolved to an empty value.`,
+					);
+				}
+
+				resolvedComponents.set(record, definition);
+				return definition;
+			});
+
 			componentCache.set(record, pending);
 
-			// Remove only the failed promise that is still cached for this record.
+			// Clear only true load failures so the next navigation can retry.
 			pending.catch(() => {
 				if (componentCache.get(record) === pending) {
 					componentCache.delete(record);
@@ -679,8 +709,7 @@ export function createRouter(options) {
 			throw getAbortError(signal);
 		}
 
-		// Shared imports may finish after this navigation is cancelled.
-		// Cancellation only stops this navigation from waiting for the import.
+		// Wait for the shared load, or stop waiting if this navigation is cancelled.
 		return await new Promise((resolve, reject) => {
 			let settled = false;
 
@@ -689,9 +718,14 @@ export function createRouter(options) {
 			};
 
 			const onAbort = () => {
-				if (settled) return;
+				if (settled) {
+					return;
+				}
+
 				settled = true;
 				cleanup();
+				// Reject only this waiter — `pending` stays in cache and may
+				// still resolve for another navigation.
 				reject(getAbortError(signal));
 			};
 
@@ -699,20 +733,28 @@ export function createRouter(options) {
 
 			pending.then(
 				(value) => {
-					if (settled) return;
+					if (settled) {
+						return;
+					}
+
 					settled = true;
 					cleanup();
 					resolve(value);
 				},
 				(error) => {
-					if (settled) return;
+					if (settled) {
+						return;
+					}
+
 					settled = true;
 					cleanup();
 					reject(error);
 				},
 			);
 
-			if (signal.aborted) onAbort();
+			if (signal.aborted) {
+				onAbort();
+			}
 		});
 	}
 
@@ -720,10 +762,10 @@ export function createRouter(options) {
 	 * Run route guards in parent-to-child order.
 	 *
 	 * Guard outcomes:
-	 * - `true` or `undefined`: continue.
-	 * - `false`: cancel.
-	 * - A string or supported target object: redirect.
-	 * - A thrown error or rejected promise: fail.
+	 * - `true` or `undefined`: continue
+	 * - `false`: cancel
+	 * - string or `{ path }`: redirect
+	 * - thrown / rejected: fail
 	 *
 	 * @param {RouteRecord[]} matched
 	 * @param {object} to
@@ -733,11 +775,15 @@ export function createRouter(options) {
 	 */
 	async function runGuards(matched, to, from, signal) {
 		for (let i = 0; i < matched.length; i++) {
-			if (signal.aborted) return { type: "cancelled" };
+			if (signal.aborted) {
+				return { type: "cancelled" };
+			}
 
 			const record = matched[i];
 
-			if (typeof record.beforeEnter !== "function") continue;
+			if (typeof record.beforeEnter !== "function") {
+				continue;
+			}
 
 			const result = await record.beforeEnter({
 				to,
@@ -746,7 +792,9 @@ export function createRouter(options) {
 				context,
 			});
 
-			if (signal.aborted) return { type: "cancelled" };
+			if (signal.aborted) {
+				return { type: "cancelled" };
+			}
 
 			if (result === false) {
 				return { type: "cancelled" };
@@ -779,23 +827,22 @@ export function createRouter(options) {
 	/**
 	 * Run route loaders in parent-to-child order.
 	 *
-	 * Every loader receives the same normalized parameters produced by the
-	 * original match, as well as the parsed query, signal, and app context.
 	 * Results are keyed by the original route-record objects.
 	 *
 	 * @param {RouteRecord[]} records
 	 * @param {Object<string, string>} params
 	 * @param {Object<string, string>} query
 	 * @param {AbortSignal} signal
-	 * @param {Object<string, *>} context
 	 * @returns {Promise<Map<RouteRecord, *>>}
 	 */
-	async function runLoaders(records, params, query, signal, context) {
+	async function runLoaders(records, params, query, signal) {
 		/** @type {Map<RouteRecord, *>} */
 		const results = new Map();
 
 		for (let i = 0; i < records.length; i++) {
-			if (signal.aborted) throw getAbortError(signal);
+			if (signal.aborted) {
+				throw getAbortError(signal);
+			}
 
 			const record = records[i];
 			let data;
@@ -809,7 +856,9 @@ export function createRouter(options) {
 				});
 			}
 
-			if (signal.aborted) throw getAbortError(signal);
+			if (signal.aborted) {
+				throw getAbortError(signal);
+			}
 
 			results.set(record, data);
 		}
@@ -820,61 +869,94 @@ export function createRouter(options) {
 	/**
 	 * Restore the browser URL to the currently committed route.
 	 *
+	 * Used after a cancelled or failed history traversal. `history.replace()`
+	 * preserves the entry key (see history.js). An optional outgoing snapshot
+	 * is written so a blocked Back/Forward does not lose that page's scroll.
+	 *
+	 * @param {ScrollSnapshot|null} [outgoingSnapshot=null]
 	 * @returns {void}
 	 */
-	function restoreCommittedURL() {
-		if (disposed) return;
+	function restoreCommittedURL(outgoingSnapshot = null) {
+		if (disposed) {
+			return;
+		}
+
+		if (outgoingSnapshot) {
+			storeScrollPosition(
+				outgoingSnapshot.key,
+				outgoingSnapshot.position,
+			);
+		}
 
 		writingHistory = true;
 
 		try {
 			history.replace(routeState.fullPath);
 		} catch {
-			// Preserve the original navigation failure.
+			// Preserve the original navigation outcome.
 		} finally {
 			writingHistory = false;
-			activeHistoryKey = history.location()?.key ?? activeHistoryKey;
-			saveCurrentScrollPosition();
+
+			const location = history.location();
+
+			if (location?.key != null) {
+				activeHistoryKey = location.key;
+			}
 		}
 	}
 
 	/**
 	 * Apply scroll behavior after the destination view has rendered.
 	 *
-	 * @param {RouteState} to
-	 * The callback runs only after the destination view has rendered. Returning
-	 * `false`, `undefined`, or `null` leaves the current position unchanged.
-	 * When `el` is provided, numeric `top` is treated as an offset from the
-	 * element's document position; without `el`, `top` is an absolute position.
+	 * Returning `false`, `null`, or `undefined` leaves the current position
+	 * unchanged. With `el`, numeric `top` is an offset from the element's
+	 * document position. Without `el`, `top` is an absolute scroll position.
 	 *
 	 * @param {RouteState} to Destination route state.
 	 * @param {RouteState|null} from Previously committed route state.
-	 * @param {{top:number,left:number}|null} savedPosition Position saved for a
-	 *   history traversal, or `null` when no saved position is available.
+	 * @param {{top: number, left: number}|null} savedPosition
+	 *   Position saved for a history traversal, or `null`.
 	 * @returns {Promise<void>}
 	 */
 	async function applyScrollBehavior(to, from, savedPosition) {
-		if (typeof scrollBehavior !== "function") return;
-		if (typeof window === "undefined") return;
+		if (!scrollBehavior || typeof window === "undefined") {
+			return;
+		}
 
 		try {
-			// Let Udodi's queued reactive effects update RouterView first, then
-			// wait for a browser frame so the destination layout is measurable.
 			await viewFactory?.afterRender?.();
+
 			const result = await scrollBehavior(to, from, savedPosition);
 
-			if (!result || result === false) return;
+			if (result == null || result === false) {
+				return;
+			}
 
 			if (typeof result.el === "string") {
-				const element = document.querySelector(result.el);
+				let element = null;
+
+				try {
+					// Selectors from hashes / app config can be invalid CSS
+					// (e.g. leading digits). Never let querySelector throw out
+					// of the post-commit scroll path.
+					element = document.querySelector(result.el);
+				} catch {
+					element = null;
+				}
 
 				if (element) {
-					// With an element target, `top` is an optional pixel offset
-					// from the element's document position (useful for fixed headers).
 					if (typeof result.top === "number") {
-						const documentTop = element.getBoundingClientRect().top + (window.scrollY ?? window.pageYOffset ?? 0);
-						window.scrollTo({ left: result.left ?? (window.scrollX ?? window.pageXOffset ?? 0), top: documentTop - result.top });
-					
+						const documentTop =
+							element.getBoundingClientRect().top +
+							(window.scrollY ?? window.pageYOffset ?? 0);
+
+						window.scrollTo({
+							left:
+								result.left ??
+								(window.scrollX ?? window.pageXOffset ?? 0),
+							top: documentTop - result.top,
+						});
+
 					} else {
 						element.scrollIntoView();
 					}
@@ -883,21 +965,42 @@ export function createRouter(options) {
 				}
 			}
 
-			window.scrollTo(result.left ?? 0, result.top ?? 0);
-		
-		} catch {
-			// Scroll behavior is post-commit and cannot roll back navigation.
+			window.scrollTo({
+				left: result.left ?? 0,
+				top: result.top ?? 0,
+			});
+
+		} catch (error) {
+			// Scrolling is post-commit and cannot roll back navigation.
+			if (
+				typeof console !== "undefined" &&
+				typeof console.warn === "function"
+			) {
+				console.warn(
+					"[Udodi Router] scrollBehavior failed after navigation committed.",
+					error,
+				);
+			}
 		}
 	}
 
 	/**
 	 * Run one navigation transaction.
 	 *
-	 * Redirects start a new transaction. The active route is not replaced
-	 * until guards, loaders, components, and metadata have resolved.
+	 * Redirects preserve the original history intent and outgoing snapshot.
+	 * Only the outermost call may resolve `router.ready`.
 	 *
 	 * @param {string|object} to
-	 * @param {{replace?: boolean, fromHistory?: boolean, initial?: boolean, historyKey?: string, redirectChain?: Set<string>, redirectedFrom?: string}} [navOptions]
+	 * @param {{
+	 *   replace?: boolean,
+	 *   fromHistory?: boolean,
+	 *   initial?: boolean,
+	 *   historyKey?: string,
+	 *   redirectChain?: Set<string>,
+	 *   redirectedFrom?: string,
+	 *   historyAction?: HistoryAction,
+	 *   outgoingSnapshot?: ScrollSnapshot|null
+	 * }} [navOptions]
 	 * @returns {Promise<NavigationResult>}
 	 */
 	async function navigate(to, navOptions = {}) {
@@ -912,13 +1015,17 @@ export function createRouter(options) {
 
 		try {
 			target = resolveTarget(to);
+
 		} catch (error) {
 			const err = toError(error);
+
 			routeState.error = err;
 
 			const result = { type: "error", error: err };
 
-			if (navOptions.initial) resolveReady(result);
+			if (navOptions.initial) {
+				resolveReady(result);
+			}
 
 			return result;
 		}
@@ -934,15 +1041,55 @@ export function createRouter(options) {
 
 			const result = { type: "error", error };
 
-			if (navOptions.initial) resolveReady(result);
+			if (navOptions.initial) {
+				resolveReady(result);
+			}
 
 			return result;
 		}
 
 		const navigationId = ++currentNavigationId;
+
+		/** @type {HistoryAction} */
+		const historyAction =
+			navOptions.historyAction ||
+			(navOptions.initial
+				? "initial"
+				: navOptions.fromHistory
+					? "traverse"
+					: navOptions.replace
+						? "replace"
+						: "push");
+
+		/**
+		 * Snapshot the outgoing page synchronously without mutating the map.
+		 * Redirect children inherit this snapshot.
+		 *
+		 * @type {ScrollSnapshot|null}
+		 */
+		let outgoingScroll = navOptions.outgoingSnapshot !== undefined
+			? navOptions.outgoingSnapshot
+			: null;
+
+		if (
+			navOptions.outgoingSnapshot === undefined &&
+			!navOptions.initial &&
+			activeHistoryKey != null
+		) {
+			const position = readWindowScrollPosition();
+
+			if (position) {
+				outgoingScroll = {
+					key: activeHistoryKey,
+					position,
+				};
+			}
+		}
+
 		cancelActiveNavigation();
 
 		const abortController = new AbortController();
+
 		activeAbortController = abortController;
 
 		const { signal } = abortController;
@@ -956,8 +1103,6 @@ export function createRouter(options) {
 		let outcome;
 
 		/**
-		 * Return a cancelled result without changing committed route data.
-		 *
 		 * @returns {NavigationResult}
 		 */
 		function cancelledResult() {
@@ -1002,7 +1147,9 @@ export function createRouter(options) {
 			if (guardResult.type === "cancelled") {
 				outcome = cancelledResult();
 
-				if (navOptions.fromHistory) restoreCommittedURL();
+				if (historyAction === "traverse") {
+					restoreCommittedURL(outgoingScroll);
+				}
 
 				return outcome;
 			}
@@ -1018,22 +1165,25 @@ export function createRouter(options) {
 
 				redirectChain.add(target);
 
+				// Keep original history intent and outgoing snapshot.
+				// Do not pass initial: true — only the outermost call owns ready.
 				const redirectResult = await navigate(redirectTo, {
-					replace: true,
 					redirectChain,
 					redirectedFrom: navOptions.redirectedFrom || target,
-					fromHistory: navOptions.fromHistory,
 					historyKey: navOptions.historyKey,
+					historyAction,
+					outgoingSnapshot: outgoingScroll,
+					fromHistory: historyAction === "traverse",
+					replace: historyAction === "replace",
 				});
 
-				outcome =
-					redirectResult.type === "completed"
-						? {
-								type: "redirected",
-								route: redirectResult.route,
-								redirectTo,
-							}
-						: redirectResult;
+				outcome = redirectResult.type === "completed"
+					? {
+							type: "redirected",
+							route: redirectResult.route,
+							redirectTo,
+						}
+					: redirectResult;
 
 				return outcome;
 			}
@@ -1043,7 +1193,6 @@ export function createRouter(options) {
 				params,
 				resolved.query,
 				signal,
-				context,
 			);
 
 			if (!isCurrentNavigation(navigationId) || signal.aborted) {
@@ -1051,7 +1200,6 @@ export function createRouter(options) {
 				return outcome;
 			}
 
-			// Resolve all required components before committing the route.
 			const componentDefinitions = new Map();
 
 			for (let i = 0; i < matchedRecords.length; i++) {
@@ -1060,7 +1208,7 @@ export function createRouter(options) {
 				if (typeof record.loadComponent === "function") {
 					const definition = await resolveComponent(record, signal);
 					componentDefinitions.set(record, definition);
-				
+
 				} else if (record.component != null) {
 					componentDefinitions.set(record, record.component);
 				}
@@ -1076,6 +1224,7 @@ export function createRouter(options) {
 				params,
 				loaderData,
 				context,
+				metaDefaults,
 			);
 
 			if (!isCurrentNavigation(navigationId) || signal.aborted) {
@@ -1108,32 +1257,60 @@ export function createRouter(options) {
 					: undefined,
 			};
 
-			// Programmatic history notifications are synchronous in the history
-			// adapters and are suppressed while this transaction writes history.
-			if (!navOptions.fromHistory && !navOptions.initial) {
-				// Capture the outgoing view before push/replace changes the active
-				// browser history entry. Scroll events keep this value current too.
-				saveCurrentScrollPosition();
+			if (!isCurrentNavigation(navigationId) || signal.aborted) {
+				outcome = cancelledResult();
+				return outcome;
+			}
+
+			/** @type {HistoryAction} */
+			let appliedHistoryAction = "none";
+
+			// Destination saved position for Back/Forward (and traversal redirects).
+			// history.replace() preserves the entry key (history.js contract).
+			const traversalKey = navOptions.historyKey ?? history.location()?.key ?? null;
+
+			const savedPosition = historyAction === "traverse"
+				? getSavedPosition(traversalKey)
+				: null;
+
+			if (historyAction === "push") {
 				const current = history.location();
 
-				if (navOptions.replace) {
-					writingHistory = true;
-
-					try {
-						history.replace(target);
-						savedPositions.delete(history.location()?.key);
-					} finally {
-						writingHistory = false;
-					}
-				
-				} else if (!current || current.fullPath !== target) {
+				if (!current || current.fullPath !== target) {
 					writingHistory = true;
 
 					try {
 						history.push(target);
+						appliedHistoryAction = "push";
 					} finally {
 						writingHistory = false;
 					}
+				}
+
+			} else if (historyAction === "replace") {
+				writingHistory = true;
+
+				try {
+					history.replace(target);
+					appliedHistoryAction = "replace";
+				} finally {
+					writingHistory = false;
+				}
+
+			} else if (
+				(historyAction === "traverse" || historyAction === "initial") &&
+				navOptions.redirectedFrom
+			) {
+				// The browser already selected the traversal entry, or this is
+				// the initial URL. Replace that entry with the final redirect
+				// target; the adapter keeps the same key.
+				writingHistory = true;
+
+				try {
+					history.replace(target);
+					appliedHistoryAction = "replace";
+				} finally {
+					writingHistory = false;
 				}
 			}
 
@@ -1144,14 +1321,84 @@ export function createRouter(options) {
 
 			commit(next);
 
+			// Head updates and analytics are post-commit side effects.
+			// They must not turn a committed navigation into a failed navigation.
+			//
+			// Script policy (from head.js):
+			// - once: true (default): install once per document identity; skip on return visits
+			// - once: false: remove previous node for this routeKey+identity and re-insert
+			try {
+				// routeKey is route-level (pathname only) so query/hash changes
+				// do not accumulate separate once:false script nodes.
+				// url is an absolute href for analytics when a browser origin exists.
+				let pageUrl = next.fullPath;
+
+				if (
+					typeof globalThis !== "undefined" &&
+					globalThis.window?.location?.origin
+				) {
+					try {
+						pageUrl = new URL(
+							next.fullPath,
+							globalThis.window.location.origin,
+						).href;
+					} catch {
+						pageUrl = next.fullPath;
+					}
+				}
+
+				headManager.apply(normalizeMeta(next.meta), {
+					routeKey: next.path,
+					url: pageUrl,
+				});
+			} catch (error) {
+				if (
+					typeof console !== "undefined" &&
+					typeof console.error === "function"
+				) {
+					console.error(
+						"[Udodi Router] Failed to apply document metadata after navigation committed.",
+						error,
+					);
+				}
+			}
+
+			// Persist outgoing scroll when that stack entry remains reachable.
+			// Ordinary replace reuses the key — do not keep the old offset.
+			// Traversal leaves the previous entry on the stack even when a
+			// redirect replaces the selected entry's URL.
+			if (
+				outgoingScroll &&
+				(appliedHistoryAction !== "replace" ||
+					historyAction === "traverse")
+			) {
+				storeScrollPosition(
+					outgoingScroll.key,
+					outgoingScroll.position,
+				);
+			}
+
 			const committedLocation = history.location();
-			activeHistoryKey = navOptions.historyKey ?? committedLocation?.key ?? activeHistoryKey;
+
+			activeHistoryKey =
+				committedLocation?.key ??
+				navOptions.historyKey ??
+				activeHistoryKey;
+
+			// Ordinary replace: drop obsolete position for the reused key.
+			// Traversal redirect: keep the selected entry's saved position.
+			if (
+				appliedHistoryAction === "replace" &&
+				historyAction !== "traverse"
+			) {
+				const replacedKey = committedLocation?.key;
+
+				if (replacedKey != null) {
+					savedPositions.delete(replacedKey);
+				}
+			}
 
 			outcome = { type: "completed", route: routeState };
-
-			const savedPosition = navOptions.fromHistory
-				? getSavedPosition(navOptions.historyKey ?? committedLocation?.key)
-				: null;
 
 			await applyScrollBehavior(routeState, from, savedPosition);
 
@@ -1160,15 +1407,17 @@ export function createRouter(options) {
 		} catch (error) {
 			if (!isCurrentNavigation(navigationId) || signal.aborted) {
 				outcome = cancelledResult();
+
 				return outcome;
 			}
 
 			const err = toError(error);
+
 			routeState.pending = false;
 			routeState.error = err;
 
-			if (navOptions.fromHistory) {
-				restoreCommittedURL();
+			if (historyAction === "traverse") {
+				restoreCommittedURL(outgoingScroll);
 			}
 
 			outcome = { type: "error", error: err };
@@ -1180,8 +1429,7 @@ export function createRouter(options) {
 				routeState.pending = false;
 			}
 
-			// `ready` describes the first navigation attempt only. Resolve it
-			// with that attempt's real outcome, even if it was superseded.
+			// Only the outermost navigation owns router.ready.
 			if (navOptions.initial) {
 				resolveReady(outcome || cancelledResult());
 			}
@@ -1192,8 +1440,7 @@ export function createRouter(options) {
 	 * Check whether a target pathname is active.
 	 *
 	 * Exact matching compares normalized pathnames. Non-exact matching checks
-	 * the committed matched-route hierarchy, avoiding false prefix matches
-	 * such as `/dashboard-old` for `/dashboard`.
+	 * the committed matched-route hierarchy.
 	 *
 	 * @param {string} targetPath
 	 * @param {boolean} [exact=false]
@@ -1214,10 +1461,10 @@ export function createRouter(options) {
 	}
 
 	/**
-	 * Handles navigation initiated by the history adapter.
+	 * Handle navigation initiated by the history adapter.
 	 *
-	 * @param {{ fullPath: string, key?: string } | null} location
-	 * @returns {Promise<NavigationResult> | undefined}
+	 * @param {{fullPath: string, key?: string}|null} location
+	 * @returns {Promise<NavigationResult>|undefined}
 	 */
 	function onHistoryChange(location) {
 		if (disposed || writingHistory || !location) {
@@ -1227,18 +1474,23 @@ export function createRouter(options) {
 		return navigate(location.fullPath, {
 			fromHistory: true,
 			historyKey: location.key,
+			historyAction: "traverse",
 		});
 	}
 
 	stopHistoryListen = history.listen(onHistoryChange);
 
-	// Start from the current URL without creating a duplicate history entry.
 	const initial = history.location();
 
 	if (initial) {
 		activeHistoryKey = initial.key ?? null;
-		void navigate(initial.fullPath, { initial: true, historyKey: initial.key });
-	
+
+		void navigate(initial.fullPath, {
+			initial: true,
+			historyKey: initial.key,
+			historyAction: "initial",
+		});
+
 	} else {
 		const error = new Error(
 			"[Udodi Router] Current browser URL is outside the configured history base.",
@@ -1262,7 +1514,7 @@ export function createRouter(options) {
 		 * @returns {Promise<NavigationResult>}
 		 */
 		push(to) {
-			return navigate(to);
+			return navigate(to, { historyAction: "push" });
 		},
 
 		/**
@@ -1272,17 +1524,24 @@ export function createRouter(options) {
 		 * @returns {Promise<NavigationResult>}
 		 */
 		replace(to) {
-			return navigate(to, { replace: true });
+			return navigate(to, {
+				replace: true,
+				historyAction: "replace",
+			});
 		},
 
 		/** @returns {void} */
 		back() {
-			if (!disposed) history.back();
+			if (!disposed) {
+				history.back();
+			}
 		},
 
 		/** @returns {void} */
 		forward() {
-			if (!disposed) history.forward();
+			if (!disposed) {
+				history.forward();
+			}
 		},
 
 		/**
@@ -1292,17 +1551,19 @@ export function createRouter(options) {
 		 * @returns {void}
 		 */
 		go(delta) {
-			if (!disposed) history.go(delta);
+			if (!disposed) {
+				history.go(delta);
+			}
 		},
 
 		/** @type {(path: string, exact?: boolean) => boolean} */
 		isActive,
 
-        /** Composition-first link component factory, assigned below. */
-        Link: null,
+		/** Composition-first link component factory, assigned below. */
+		Link: null,
 
-        /** Route outlet component factory, assigned below. */
-        RouterView: null,
+		/** Route outlet component factory, assigned below. */
+		RouterView: null,
 
 		/**
 		 * Dispose router work and listeners.
@@ -1313,20 +1574,21 @@ export function createRouter(options) {
 		 * @returns {void}
 		 */
 		destroy() {
-			if (disposed) return;
+			if (disposed) {
+				return;
+			}
 
 			disposed = true;
 			currentNavigationId++;
 			cancelActiveNavigation();
-
 			viewFactory?.destroy();
+			headManager.destroy();
 
-			if (stopScrollCapture) {
-				stopScrollCapture();
-				stopScrollCapture = null;
-			}
-
-			if (previousScrollRestoration !== null && typeof window !== "undefined" && "scrollRestoration" in window.history) {
+			if (
+				previousScrollRestoration !== null &&
+				typeof window !== "undefined" &&
+				"scrollRestoration" in window.history
+			) {
 				window.history.scrollRestoration = previousScrollRestoration;
 				previousScrollRestoration = null;
 			}
@@ -1356,6 +1618,7 @@ export function createRouter(options) {
 	};
 
 	const linkFactory = createLinkFactory(router, { base });
+
 	viewFactory = createViewFactory(router, {
 		getComponent: getResolvedComponent,
 		maxKeepAlive: options.maxKeepAlive ?? 10,
