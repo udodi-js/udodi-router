@@ -104,7 +104,7 @@ render(App(), "#app");
 Route `path` values are matched against the **pathname** only (query and hash are handled separately). Paths should be application-absolute when defined at the root (leading `/`). Child paths are relative to their parent unless they begin with `/`.
 
 | Syntax | Example | Notes |
-|--------|---------|--------|
+|:-------|:--------|:-------|
 | Static | `/users/new` | Exact segment match |
 | Parameter | `/users/:id` | One path segment; decoded into `params.id` |
 | Constrained parameter | `/users/:id(\\d+)` | Same as a parameter, but the segment must match the regex |
@@ -157,7 +157,7 @@ const Post = createComponent({
     };
   },
 
-  onMount(_root, ctx) {
+  onMount(root, ctx) {
     const stop = effect(() => {
       ctx.title = router.route.data?.title ?? "Loading post...";
       ctx.content = router.route.data?.content ?? "";
@@ -305,7 +305,7 @@ const router = createRouter({
 ```
 
 | Case | Typical return |
-|------|----------------|
+|:-----|:---------------|
 | History navigation with a saved position | `savedPosition` |
 | Hash target | `{ el: to.hash, top?: number }` |
 | New navigation | `{ top: 0 }` or `{ top, left }` |
@@ -400,7 +400,7 @@ const router = createRouter({
 ### Inheritance rules
 
 | Value | Meaning |
-|--------|---------|
+|:-------|:--------|
 | Property **omitted** | Inherit from parent (or defaults) |
 | `null` | Clear that field / section |
 | Nested `openGraph` / `twitter` | Shallow merge; child keys win; `null` clears the section |
@@ -585,7 +585,7 @@ export async function handleRequest(request) {
 ```
 
 | Helper | Role |
-|--------|------|
+|:-------|:-----|
 | `resolveHead({ routes, pathname, ... })` | Match → loaders → resolve meta → HTML (typical SEO path) |
 | `matchRoutes(routes, pathname)` | Pure match → `{ path, params, record, matched }` or `null` |
 | `resolveMetadata({ matched, params, ... })` | Run route `meta` (static or async), parent → child merge |
@@ -602,7 +602,7 @@ You choose the backend (Node, PHP, static generator, etc.). The router does not 
 ### Prefix vs exact
 
 | Call | Meaning |
-|------|---------|
+|:-----|:--------|
 | `router.isActive("/dashboard")` | `true` when the committed path is `/dashboard` **or** any nested child under that matched record (for example `/dashboard/settings`) |
 | `router.isActive("/dashboard", true)` | `true` only when the committed pathname equals `/dashboard` |
 
@@ -679,7 +679,7 @@ Paths passed to `isActive` should be application-absolute (leading `/`), the sam
 ## API surface
 
 | Export | From | Role |
-|--------|------|------|
+|:-------|:-----|:-----|
 | `createRouter` | `udodi-router` | Main router instance |
 | `createWebHistory` | `udodi-router` | HTML5 history (default) |
 | `createHashHistory` | `udodi-router` | Hash history |
@@ -693,7 +693,7 @@ Instance API: `push`, `replace`, `back`, `forward`, `go`, `isActive`, `Link`, `R
 ### `createRouter` options (common)
 
 | Option | Description |
-|--------|-------------|
+|:-------|:------------|
 | `routes` | Route record array (required) |
 | `history` | Custom history adapter |
 | `base` | Deployment base path |

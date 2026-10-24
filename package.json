@@ -1,6 +1,6 @@
 {
   "name": "udodi-router",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Optional, lightweight router for Udodi applications with client navigation and server-side metadata support for SEO",
   "keywords": [
     "udodi",
@@ -55,14 +55,14 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "udodi": "^1.1.4"
+    "udodi": "^1.1.5"
   },
   "devDependencies": {
     "@vitest/ui": "^5.0.5",
     "happy-dom": "^21.0.3",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
-    "udodi": "^1.1.4",
+    "udodi": "^1.1.5",
     "vitest": "^5.0.5"
   }
 }
