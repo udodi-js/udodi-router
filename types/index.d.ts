@@ -216,20 +216,6 @@ export function createMatcher(
 	options?: MatcherOptions,
 ): (pathname: string) => MatchResult | null;
 
-/**
- * Compile routes and match a single pathname.
- *
- * @example
- * ```ts
- * const result = matchRoutes(routes, "/posts/1");
- * ```
- */
-export function matchRoutes(
-	routes: RouteRecord[],
-	pathname: string,
-	options?: MatcherOptions,
-): MatchResult | null;
-
 /* ────────────────────────────────────────────────────────────────────────── *
  * History
  * ────────────────────────────────────────────────────────────────────────── */

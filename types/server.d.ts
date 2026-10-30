@@ -48,15 +48,6 @@ export function createMatcher(
 	options?: MatcherOptions,
 ): (pathname: string) => MatchResult | null;
 
-/**
- * Compile routes and match a single pathname.
- */
-export function matchRoutes(
-	routes: RouteRecord[],
-	pathname: string,
-	options?: MatcherOptions,
-): MatchResult | null;
-
 /** Wrapper or raw record accepted by {@link resolveMetadata}. */
 export type MatchedMetaEntry =
 	| RouteRecord
@@ -112,7 +103,13 @@ export function renderMetadata(
 ): string;
 
 export interface ResolveHeadOptions {
-	routes: RouteRecord[];
+	/** Required when `matcher` is omitted. */
+	routes?: RouteRecord[];
+	/**
+	 * Reusable matcher from `createMatcher()`. When supplied, `routes` and
+	 * `base` are not used for matching.
+	 */
+	matcher?: (pathname: string) => MatchResult | null;
 	/** Pathname only (no query or hash). */
 	pathname: string;
 	base?: string;

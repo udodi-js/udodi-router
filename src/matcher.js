@@ -589,8 +589,8 @@ export function createMatcher(routes, { base = "" } = {}) {
 			for (let i = 0, length = candidates.length; i < length; i++) {
 				const candidate = candidates[i];
 
-				/** @type {Object<string, string>} */
-				const params = Object.create(null);
+				/** @type {Object<string, string>|null} */
+				let params = null;
 
 				let matches = true;
 
@@ -629,13 +629,17 @@ export function createMatcher(routes, { base = "" } = {}) {
 						break;
 					}
 
+					if (params === null) {
+						params = Object.create(null);
+					}
+
 					params[expectedParam] = decoded;
 				}
 
 				if (matches) {
 					return {
 						path,
-						params,
+						params: params === null ? Object.create(null) : params,
 						record: candidate.record,
 						matched: candidate.matched,
 					};
@@ -655,17 +659,4 @@ export function createMatcher(routes, { base = "" } = {}) {
 
 		return null;
 	};
-}
-
-/**
- * Convenience helper that compiles routes and immediately matches a pathname.
- * Prefer `createMatcher()` when matching multiple paths against the same table.
- *
- * @param {RouteRecord[]} routes
- * @param {string} pathname
- * @param {MatcherOptions} [options]
- * @returns {MatchResult|null}
- */
-export function matchRoutes(routes, pathname, options) {
-	return createMatcher(routes, options)(pathname);
 }

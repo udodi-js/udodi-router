@@ -12,4 +12,4 @@ export {
 	createMemoryHistory,
 } from "./history.js";
 
-export { createMatcher, matchRoutes } from "./matcher.js";
+export { createMatcher } from "./matcher.js";
