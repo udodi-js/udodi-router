@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-	matchRoutes,
+	createMatcher,
 	renderMetadata,
 	resolveHead,
 	resolveMetadata,
 } from "../src/server.js";
 
-describe("matchRoutes (server)", () => {
+describe("createMatcher (server)", () => {
 	const routes = [
 		{ path: "/", meta: { title: "Home" } },
 		{
@@ -15,14 +15,15 @@ describe("matchRoutes (server)", () => {
 		},
 		{ path: "*", meta: { title: "Missing" } },
 	];
+	const matchPath = createMatcher(routes);
 
 	it("matches static and parametric paths", () => {
-		expect(matchRoutes(routes, "/").path).toBe("/");
-		expect(matchRoutes(routes, "/posts/42").params.id).toBe("42");
+		expect(matchPath("/").path).toBe("/");
+		expect(matchPath("/posts/42").params.id).toBe("42");
 	});
 
 	it("respects base", () => {
-		const match = matchRoutes(routes, "/app/posts/7", { base: "/app" });
+		const match = createMatcher(routes, { base: "/app" })("/app/posts/7");
 
 		expect(match.path).toBe("/posts/7");
 		expect(match.params.id).toBe("7");
@@ -50,7 +51,7 @@ describe("resolveMetadata + renderMetadata", () => {
 			},
 		];
 
-		const match = matchRoutes(routes, "/about");
+		const match = createMatcher(routes)("/about");
 		const metadata = await resolveMetadata({
 			matched: match.matched,
 			params: match.params,
@@ -80,7 +81,7 @@ describe("resolveMetadata + renderMetadata", () => {
 			}),
 		};
 
-		const match = matchRoutes([record], "/posts/9");
+		const match = createMatcher([record])("/posts/9");
 		const loaderData = new Map([
 			[record, await record.loader({ params: match.params })],
 		]);

@@ -7,10 +7,10 @@
  * @module server
  */
 
-import { createMatcher, matchRoutes } from "./matcher.js";
+import { createMatcher } from "./matcher.js";
 import { normalizeMeta, resolveMeta } from "./meta.js";
 
-export { createMatcher, matchRoutes };
+export { createMatcher };
 
 /**
  * @typedef {import("./matcher.js").RouteRecord} RouteRecord
@@ -361,7 +361,8 @@ async function runServerLoaders(matched, params, options = {}) {
  * Lower-level exports remain available for custom pipelines.
  *
  * @param {Object} options
- * @param {RouteRecord[]} options.routes
+ * @param {RouteRecord[]} [options.routes] Route table used when matcher is omitted.
+ * @param {(pathname: string) => MatchResult|null} [options.matcher] Reusable matcher from createMatcher().
  * @param {string} options.pathname Pathname only (no query/hash)
  * @param {string} [options.base] Deployment base path
  * @param {Object|Function} [options.defaults] Meta defaults
@@ -380,6 +381,7 @@ async function runServerLoaders(matched, params, options = {}) {
  */
 export async function resolveHead({
 	routes,
+	matcher,
 	pathname,
 	base = "",
 	defaults = Object.create(null),
@@ -390,8 +392,14 @@ export async function resolveHead({
 	loaderData = null,
 	includeScripts = false,
 } = {}) {
-	if (!Array.isArray(routes)) {
-		throw new TypeError("[udodi-router/server] routes must be an array.");
+	if (matcher != null && typeof matcher !== "function") {
+		throw new TypeError("[udodi-router/server] matcher must be a function.");
+	}
+
+	if (typeof matcher !== "function" && !Array.isArray(routes)) {
+		throw new TypeError(
+			"[udodi-router/server] routes must be an array when matcher is omitted.",
+		);
 	}
 
 	if (typeof pathname !== "string") {
@@ -400,7 +408,9 @@ export async function resolveHead({
 		);
 	}
 
-	const match = matchRoutes(routes, pathname, { base });
+	const match = typeof matcher === "function"
+		? matcher(pathname)
+		: createMatcher(routes, { base })(pathname);
 
 	/** @type {Map<RouteRecord, *>} */
 	let dataMap = loaderData instanceof Map ? loaderData : new Map();
