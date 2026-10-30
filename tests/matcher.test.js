@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMatcher, matchRoutes } from "../src/matcher.js";
+import { createMatcher } from "../src/matcher.js";
 
 describe("createMatcher", () => {
 	it("matches static routes", () => {
@@ -91,15 +91,5 @@ describe("createMatcher", () => {
 				{ path: "/users/:userId", component: "B" },
 			]),
 		).toThrow(/Duplicate route pattern/);
-	});
-});
-
-describe("matchRoutes", () => {
-	it("compiles and matches in one call", () => {
-		const result = matchRoutes(
-			[{ path: "/posts/:id", component: "Post" }],
-			"/posts/7",
-		);
-		expect(result.params.id).toBe("7");
 	});
 });

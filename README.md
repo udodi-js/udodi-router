@@ -6,7 +6,7 @@
 
 **udodi-router** is an optional, lightweight navigation layer for [Udodi](https://udodi.dev) applications. It handles URL matching, nested routes, guards, loaders, links, outlets, and document metadata while staying aligned with Udodi's model: **routing should feel like ordinary Udodi code, not like adopting another framework.**
 
-It does not introduce a virtual DOM, a second reactivity system, or `eval` / `new Function()`. It builds on Udodi's existing `createComponent()`, `reactive()`, `effect()`, and lifecycle APIs.
+It does not introduce a virtual DOM, a second reactivity system, or `eval` / `new Function()`. It builds on Udodi's existing `createComponent()`, reactivity, and lifecycle APIs.
 
 ## Key features
 
@@ -18,7 +18,7 @@ It does not introduce a virtual DOM, a second reactivity system, or `eval` / `ne
 - **Scroll restoration**: Restores saved scroll positions during browser history navigation; supports hash targets and configurable scroll behavior.
 - **Semantic metadata**: Title, Open Graph, Twitter, JSON-LD, and custom head tags via plain objects.
 - **CSP-friendly / no required build**: Plain ESM and native `import()` for lazy routes.
-- **Server-safe matching**: Pure `matchRoutes`, `resolveMetadata`, `renderMetadata`, and `resolveHead` via `udodi-router/server` for SEO pipelines, without pulling in browser code.
+- **Server-safe matching**: Reusable `createMatcher`, `resolveMetadata`, `renderMetadata`, and `resolveHead` via `udodi-router/server` for SEO pipelines, without pulling in browser code.
 
 ## Installation
 
@@ -515,11 +515,34 @@ export async function handleRequest(request) {
 }
 ```
 
+### Reuse a matcher for repeated requests
+
+`resolveHead()` compiles routes when called with `routes`. For a long-running server that handles repeated requests against the same route table, compile a matcher once and pass it to each call:
+
+```js
+import { createMatcher, resolveHead } from "udodi-router/server";
+
+const matcher = createMatcher(routes, { base: "/app" });
+
+export async function handleRequest(request) {
+  const url = new URL(request.url);
+
+  return resolveHead({
+    matcher,
+    pathname: url.pathname,
+    signal: request.signal,
+    defaults: { openGraph: { siteName: "Udodi" } },
+  });
+}
+```
+
+The matcher stores the compiled route table and base path. Recreate it if either changes. When `matcher` is supplied, `routes` and `base` are not needed in the `resolveHead()` call.
+
 ### Step-by-step (full control)
 
 ```js
 import {
-  matchRoutes,
+  createMatcher,
   resolveMetadata,
   renderMetadata,
 } from "udodi-router/server";
@@ -527,6 +550,8 @@ import { readFile } from "node:fs/promises";
 
 // Run each matched record's loader (parent to child).
 // Same loader functions as the client.
+const matchRequestPath = createMatcher(routes);
+
 async function runLoaders(matched, params, signal) {
   const loaderData = new Map();
 
@@ -551,10 +576,7 @@ async function runLoaders(matched, params, signal) {
 
 export async function handleRequest(request) {
   const url = new URL(request.url);
-  const match = matchRoutes(
-    routes, // same route table as the client
-    url.pathname,
-  );
+  const match = matchRequestPath(url.pathname);
 
   if (!match) {
     return new Response("Not found", { status: 404 });
@@ -586,12 +608,11 @@ export async function handleRequest(request) {
 
 | Helper | Role |
 |:-------|:-----|
-| `resolveHead({ routes, pathname, ... })` | Match → loaders → resolve meta → HTML (typical SEO path) |
-| `matchRoutes(routes, pathname)` | Pure match → `{ path, params, record, matched }` or `null` |
+| `resolveHead({ routes, pathname, ... })` or `resolveHead({ matcher, pathname, ... })` | Match → loaders → resolve meta → HTML (typical SEO path) |
 | `resolveMetadata({ matched, params, ... })` | Run route `meta` (static or async), parent → child merge |
 | `renderMetadata(metadata)` | Safe HTML string for injection into your document shell |
 
-`resolveHead` options include `base`, `defaults`, `context`, `query`, `signal`, `runLoaders` (default `true`), `loaderData` (when `runLoaders: false`), and `includeScripts` (default `false`).
+`resolveHead` accepts either `routes` or a reusable `matcher` created with `createMatcher()`. `base` applies when `resolveHead` creates a matcher from `routes`; it is already configured on a supplied matcher. Other options include `defaults`, `context`, `query`, `signal`, `runLoaders` (default `true`), `loaderData` (when `runLoaders: false`), and `includeScripts` (default `false`).
 
 You choose the backend (Node, PHP, static generator, etc.). The router does not require hydration or a meta-framework.
 
@@ -639,7 +660,7 @@ const SideNav = createComponent({
     };
   },
 
-  onMount(_root, ctx) {
+  onMount(root, ctx) {
     const stop = effect(() => {
       ctx.dashboardActive = router.isActive("/dashboard");
       ctx.settingsExact = router.isActive("/dashboard/settings", true);
@@ -684,7 +705,7 @@ Paths passed to `isActive` should be application-absolute (leading `/`), the sam
 | `createWebHistory` | `udodi-router` | HTML5 history (default) |
 | `createHashHistory` | `udodi-router` | Hash history |
 | `createMemoryHistory` | `udodi-router` | In-memory history (tests) |
-| `createMatcher` / `matchRoutes` | `udodi-router/server` | Pure pathname matching |
+| `createMatcher` | `udodi-router/server` | Compile a reusable pathname matcher |
 | `resolveHead` | `udodi-router/server` | One-shot match → loaders → meta → HTML |
 | `resolveMetadata` / `renderMetadata` | `udodi-router/server` | Server SEO primitives (custom pipelines) |
 

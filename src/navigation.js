@@ -1200,17 +1200,11 @@ export function createRouter(options) {
 				return outcome;
 			}
 
-			const componentDefinitions = new Map();
-
 			for (let i = 0; i < matchedRecords.length; i++) {
 				const record = matchedRecords[i];
 
 				if (typeof record.loadComponent === "function") {
-					const definition = await resolveComponent(record, signal);
-					componentDefinitions.set(record, definition);
-
-				} else if (record.component != null) {
-					componentDefinitions.set(record, record.component);
+					await resolveComponent(record, signal);
 				}
 
 				if (!isCurrentNavigation(navigationId) || signal.aborted) {
@@ -1235,10 +1229,10 @@ export function createRouter(options) {
 			const matched = createMatchedEntries(matchedRecords, loaderData);
 
 			for (let i = 0; i < matched.length; i++) {
-				const record = matched[i].record;
+				const component = getResolvedComponent(matched[i]);
 
-				if (componentDefinitions.has(record)) {
-					matched[i].resolvedComponent = componentDefinitions.get(record);
+				if (component != null) {
+					matched[i].resolvedComponent = component;
 				}
 			}
 
