@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createComponent, render } from "udodi";
 import { createRouter } from "../src/navigation.js";
 
 function createMockHistory(initialPath = "/") {
@@ -86,6 +87,149 @@ afterEach(() => {
 });
 
 describe("createRouter navigation", () => {
+	it("explains when a route receives an invoked component placeholder", async () => {
+		const Home = createComponent({
+			name: "Home",
+			template: "<p>Home page</p>",
+		});
+		const router = createRouter({
+			history: createMockHistory("/home"),
+			routes: [{ path: "/home", component: Home() }],
+		});
+		routers.push(router);
+		await router.ready;
+
+		const container = document.createElement("div");
+		const App = createComponent({
+			name: "App",
+			template: `<main>${router.RouterView()}</main>`,
+		});
+
+		expect(() => render(App(), container)).toThrow(
+			/component: Home\(\)/,
+		);
+		container.remove();
+	});
+
+	it("remounts a route component factory safely after navigating back to its route", async () => {
+		let homeMounts = 0;
+		let homeUnmounts = 0;
+		const Home = createComponent({
+			name: "Home",
+			template: "<p>Home page</p>",
+			onMount() {
+				homeMounts += 1;
+			},
+			onUnmount() {
+				homeUnmounts += 1;
+			},
+		});
+		const Other = createComponent({
+			name: "Other",
+			template: "<p>Other page</p>",
+		});
+		const router = createRouter({
+			history: createMockHistory("/home"),
+			routes: [
+				{ path: "/home", component: Home },
+				{ path: "/other", component: Other },
+			],
+		});
+		routers.push(router);
+
+		await router.ready;
+
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const App = createComponent({
+			name: "App",
+			template: `<main>${router.RouterView()}</main>`,
+		});
+		const app = render(App(), container);
+		expect(container.textContent).toContain("Home page");
+		expect(homeMounts).toBe(1);
+
+		await router.push("/other");
+		expect(container.textContent).toContain("Other page");
+		expect(homeUnmounts).toBe(1);
+
+		await router.push("/home");
+		expect(container.textContent).toContain("Home page");
+		expect(homeMounts).toBe(2);
+		expect(homeUnmounts).toBe(1);
+
+		app?.unmount?.();
+		container.remove();
+	});
+
+	it("renders nested route outlets at their matched depth", async () => {
+		let router;
+		const PlannerLayout = createComponent({
+			name: "PlannerLayout",
+			template: () =>
+				`<section data-level="planner">
+					<h1>Planner</h1>
+					${router.RouterView()}
+				</section>`,
+		});
+		const BudgetLayout = createComponent({
+			name: "BudgetLayout",
+			template: () =>
+				`<section data-level="budget">
+					<h2>Budget</h2>
+					${router.RouterView()}
+				</section>`,
+		});
+		const BudgetPage = createComponent({
+			name: "BudgetPage",
+			template: "<p>Budget page</p>",
+		});
+		router = createRouter({
+			history: createMockHistory("/planner/budget/overview"),
+			routes: [
+				{
+					path: "/planner",
+					component: PlannerLayout,
+					children: [
+						{
+							path: "budget",
+							component: BudgetLayout,
+							children: [
+								{
+									path: "overview",
+									component: BudgetPage,
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		routers.push(router);
+
+		await router.ready;
+
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const App = createComponent({
+			name: "App",
+			template: `<main>${router.RouterView()}</main>`,
+		});
+		const app = render(App(), container);
+
+		expect(container.textContent).toContain("Planner");
+		expect(container.textContent).toContain("Budget");
+		expect(container.textContent).toContain("Budget page");
+
+		const hosts = container.querySelectorAll("[data-udodi-route-view]");
+		expect(hosts).toHaveLength(3);
+		expect(hosts[0].contains(hosts[1])).toBe(true);
+		expect(hosts[1].contains(hosts[2])).toBe(true);
+
+		app?.unmount?.();
+		container.remove();
+	});
+
 	it("redirects during initial navigation via beforeEnter and resolves ready", async () => {
 		const history = createMockHistory("/dashboard");
 

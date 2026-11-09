@@ -9,16 +9,6 @@ import { createComponent, effect, render } from "udodi";
 const DEFAULT_MAX_KEEP_ALIVE = 10;
 
 /**
- * DOM attribute identifying a route-view host and its matched depth.
- *
- * Nested RouterView instances use this attribute to determine which
- * entry in router.route.matched they are responsible for rendering.
- *
- * @type {string}
- */
-const VIEW_DEPTH_ATTR = "data-udodi-route-depth";
-
-/**
  * Internal representation of a mounted route view.
  *
  * @typedef {Object} RouteViewEntry
@@ -91,6 +81,16 @@ export function createViewFactory(
 	const outlets = new Set();
 
 	/**
+	 * Route depth inherited by RouterView instances mounted while a route
+	 * component is being rendered. Udodi resolves nested components while
+	 * their template fragment is detached, so DOM ancestry is not reliable
+	 * during onMount().
+	 *
+	 * @type {number}
+	 */
+	let renderingDepth = 0;
+
+	/**
 	 * Creates one RouterView component definition.
 	 *
 	 * The outlet root is deliberately a simple element. Route components
@@ -104,18 +104,12 @@ export function createViewFactory(
 
 		onMount(root, ctx) {
 			/**
-			 * Determine this outlet's depth from its enclosing route host.
+			 * Read this outlet's depth from the active route render context.
 			 *
-			 * The application-level outlet has depth 0. An outlet inside
-			 * the component rendered at depth 0 has depth 1, and so on.
+			 * The application-level outlet has depth 0. A nested outlet reads
+			 * the next depth while its parent route component is being rendered.
 			 */
-			const parentHost = root.parentElement?.closest(
-				`[${VIEW_DEPTH_ATTR}]`,
-			);
-
-			const depth = parentHost
-				? Number(parentHost.getAttribute(VIEW_DEPTH_ATTR)) + 1
-				: 0;
+			const depth = renderingDepth;
 
 			/**
 			 * Mounted route views retained by this outlet.
@@ -148,7 +142,6 @@ export function createViewFactory(
 			function createHost(routeEntry) {
 				const host = document.createElement("div");
 
-				host.setAttribute(VIEW_DEPTH_ATTR, String(depth));
 				host.setAttribute("data-udodi-route-view", "");
 				host.setAttribute("data-udodi-route-path", routeEntry.path || "");
 
@@ -276,15 +269,22 @@ export function createViewFactory(
 				const componentFactory = getComponent(routeEntry);
 
 				if (typeof componentFactory !== "function") {
+					const receivedType = componentFactory === null
+						? "null"
+						: typeof componentFactory;
+					const hint = receivedType === "string"
+						? " It looks like a component placeholder; pass the factory itself (component: Home), not its result (component: Home())."
+						: " Pass a Udodi component factory directly (component: Home).";
+
 					throw new TypeError(
-						`[udodi-router] Route "${routeEntry.path}" does not have a resolved component factory.`,
+						`[udodi-router] Route "${routeEntry.path}" expected a component factory, but received ${receivedType}.${hint}`,
 					);
 				}
 
 				const host = createHost(routeEntry);
 
-				// Insert the host before rendering so nested RouterView
-				// instances can determine their matched depth.
+				// Insert the host before rendering so route components are
+				// mounted into their live outlet.
 				root.appendChild(host);
 
 				/** @type {RouteViewEntry} */
@@ -296,10 +296,20 @@ export function createViewFactory(
 				};
 
 				try {
-					entry.instance = render(
-						componentFactory(),
-						host,
-					);
+					const previousDepth = renderingDepth;
+					renderingDepth = depth + 1;
+
+					try {
+						// Invoke the Udodi factory for each mount so each route view
+						// receives a fresh placeholder registration.
+						entry.instance = render(
+							componentFactory(),
+							host,
+						);
+
+					} finally {
+						renderingDepth = previousDepth;
+					}
 
 				} catch (error) {
 					host.remove();

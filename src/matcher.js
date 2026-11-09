@@ -24,7 +24,7 @@
 /**
  * @typedef {Object} RouteRecord
  * @property {string} path Route path. Child paths are relative unless they begin with `/`.
- * @property {Function|Object} [component] Component definition or lazy component loader.
+ * @property {Function} [component] Udodi component factory. Invoke it from the router only when mounting a route view.
  * @property {() => Promise<*>} [loadComponent] Lazy component loader. Prefer this over putting a Promise in `component`.
  * @property {Function} [loader] Route data loader, executed by the router rather than matcher.
  * @property {Object|Function} [meta] Route metadata.
