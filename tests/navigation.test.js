@@ -162,6 +162,65 @@ describe("createRouter navigation", () => {
 		container.remove();
 	});
 
+	it("keeps an opted-in route mounted and reuses it when revisited", async () => {
+		let homeMounts = 0;
+		let homeUnmounts = 0;
+		const Home = createComponent({
+			name: "Home",
+			template: "<p>Home page</p>",
+			onMount() {
+				homeMounts += 1;
+			},
+			onUnmount() {
+				homeUnmounts += 1;
+			},
+		});
+		const Other = createComponent({
+			name: "Other",
+			template: "<p>Other page</p>",
+		});
+		const router = createRouter({
+			history: createMockHistory("/home"),
+			routes: [
+				{ path: "/home", component: Home, keepAlive: true },
+				{ path: "/other", component: Other },
+			],
+		});
+		routers.push(router);
+
+		await router.ready;
+
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const App = createComponent({
+			name: "App",
+			template: `<main>${router.RouterView()}</main>`,
+		});
+		const app = render(App(), container);
+		const homeHost = container.querySelector(
+			'[data-udodi-route-path="/home"]',
+		);
+
+		expect(homeHost).not.toBeNull();
+		expect(homeMounts).toBe(1);
+
+		await router.push("/other");
+		expect(container.textContent).toContain("Other page");
+		expect(homeHost.isConnected).toBe(true);
+		expect(homeHost.hidden).toBe(true);
+		expect(homeUnmounts).toBe(0);
+
+		await router.push("/home");
+		expect(container.textContent).toContain("Home page");
+		expect(container.querySelector('[data-udodi-route-path="/home"]')).toBe(homeHost);
+		expect(homeHost.hidden).toBe(false);
+		expect(homeMounts).toBe(1);
+		expect(homeUnmounts).toBe(0);
+
+		app?.unmount?.();
+		container.remove();
+	});
+
 	it("renders nested route outlets at their matched depth", async () => {
 		let router;
 		const PlannerLayout = createComponent({
