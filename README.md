@@ -220,12 +220,14 @@ const result = await router.push("/account/settings");
 
 ## Nested layouts
 
-The parent layout is a normal component that includes another `RouterView`. Nested depth is detected automatically.
+The parent layout is a normal component that includes another `RouterView`. Nested outlets render the next component in the matched route chain.
 
 ```js
+let router;
+
 const DashboardLayout = createComponent({
   name: "DashboardLayout",
-  template: html`
+  template: () => html`
     <div class="dashboard">
       <aside>...</aside>
       <main>${router.RouterView()}</main>
@@ -233,19 +235,28 @@ const DashboardLayout = createComponent({
   `,
 });
 
-const routes = [
-  {
-    path: "/dashboard",
-    component: DashboardLayout,
-    children: [
-      { path: "", component: OverviewPanel },
-      { path: "settings", component: SettingsPanel },
-    ],
-  },
-];
+router = createRouter({
+  routes: [
+    {
+      path: "/dashboard",
+      component: DashboardLayout,
+      children: [
+        { path: "", component: OverviewPanel },
+        { path: "settings", component: SettingsPanel },
+      ],
+    },
+  ],
+});
+
+const App = createComponent({
+  name: "App",
+  template: html`<main>${router.RouterView()}</main>`,
+});
+
+render(App(), "#app");
 ```
 
-The root app still renders `${router.RouterView()}` for depth 0.
+The layout's template is a function so its `router.RouterView()` call runs after the router has been created. Pass component factories directly as `component: DashboardLayout`; the router invokes the factory for each mount. Do not call it in the route record, because that stores a placeholder string instead of a factory. The root app's outlet renders the parent layout; the layout's outlet renders its selected child.
 
 ## Lazy routes
 

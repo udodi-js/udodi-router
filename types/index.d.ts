@@ -41,6 +41,14 @@ export type QueryInput = Record<string, QueryParamValue>;
 /** Normalized query/params after parsing (string values only). */
 export type StringRecord = Record<string, string>;
 
+/** A Udodi component factory stored in a route record. */
+export type RouteComponentFactory = (...args: any[]) => string;
+
+/** A lazy component loader may return a factory or a module with a default factory. */
+export type LazyRouteComponent =
+	| RouteComponentFactory
+	| { default: RouteComponentFactory };
+
 /* ────────────────────────────────────────────────────────────────────────── *
  * Matcher
  * ────────────────────────────────────────────────────────────────────────── */
@@ -50,10 +58,10 @@ export type StringRecord = Record<string, string>;
  */
 export interface RouteRecord {
 	path: string;
-	/** Synchronous component factory or definition. Prefer `loadComponent` for lazy routes. */
-	component?: unknown;
+	/** Udodi component factory. Prefer `loadComponent` for lazy routes. */
+	component?: RouteComponentFactory;
 	/** Lazy component loader, e.g. `() => import("./Page.js")`. */
-	loadComponent?: () => Promise<unknown>;
+	loadComponent?: () => Promise<LazyRouteComponent>;
 	/** Async data loader. Receives `{ params, query, signal, context }`. */
 	loader?: (ctx: RouteHookContext) => unknown | Promise<unknown>;
 	/**
@@ -67,19 +75,7 @@ export interface RouteRecord {
 	 * Guard. Return `true` / `undefined` to continue, `false` to cancel,
 	 * or a path / `{ path, query?, hash? }` to redirect.
 	 */
-	beforeEnter?: (
-		ctx: GuardContext,
-	) =>
-		| boolean
-		| void
-		| string
-		| { path: string; query?: QueryInput; hash?: string }
-		| Promise<
-				| boolean
-				| void
-				| string
-				| { path: string; query?: QueryInput; hash?: string }
-		  >;
+	beforeEnter?: NavigationGuard;
 	/** When true, the outlet may retain this view while inactive. */
 	keepAlive?: boolean;
 	/** Application marker only; does not affect matching. */
@@ -119,6 +115,14 @@ export interface GuardContext {
 	readonly signal: AbortSignal;
 	readonly context: Record<string, unknown>;
 }
+
+/** Values a navigation guard can return to continue, cancel, or redirect. */
+export type NavigationGuardResult = boolean | void | NavigationTarget;
+
+/** Route guard called before a navigation is committed. */
+export type NavigationGuard = (
+	ctx: GuardContext,
+) => NavigationGuardResult | Promise<NavigationGuardResult>;
 
 /**
  * Semantic page metadata. Used by the client head manager and server render helpers.
@@ -364,6 +368,19 @@ export interface LinkOptions {
 	[key: string]: unknown;
 }
 
+/** Context available to a function used as a `router.Link()` template. */
+export interface RouterLinkTemplateContext {
+	readonly isActive: boolean;
+	readonly to: NavigationTarget;
+	readonly exact: boolean;
+	readonly [key: string]: unknown;
+}
+
+/** HTML string or context-aware template supplied to `router.Link()`. */
+export type RouterLinkTemplate =
+	| string
+	| ((ctx: RouterLinkTemplateContext) => string);
+
 /**
  * Router instance returned by {@link createRouter}.
  */
@@ -403,7 +420,7 @@ export interface Router {
 	 * `)
 	 * ```
 	 */
-	Link: (options: LinkOptions, contentTemplate?: unknown) => unknown;
+	Link: (options: LinkOptions, contentTemplate: RouterLinkTemplate) => string;
 
 	/**
 	 * Route outlet for the matched depth (auto-detected when nested).
@@ -413,7 +430,7 @@ export interface Router {
 	 * html`<main>${router.RouterView()}</main>`
 	 * ```
 	 */
-	RouterView: () => unknown;
+	RouterView: () => string;
 
 	/** Dispose listeners, views, head manager, and owned history. */
 	destroy(): void;

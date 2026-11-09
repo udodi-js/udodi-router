@@ -32,9 +32,14 @@ import type {
 } from "./index.js";
 
 export type {
+	GuardContext,
+	LazyRouteComponent,
 	MatchResult,
 	MatcherOptions,
+	NavigationGuard,
+	NavigationGuardResult,
 	QueryInput,
+	RouteComponentFactory,
 	RouteMeta,
 	RouteRecord,
 	StringRecord,
