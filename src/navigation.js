@@ -518,9 +518,27 @@ export function createRouter(options) {
 		}
 
 		activeKeys.length = 0;
+		let parentPath = "/";
 
 		for (let i = 0; i < matched.length; i++) {
-			const path = matched[i].path;
+			const routePath = matched[i].path;
+
+			// Matched entries retain the path as declared in the route config.
+			// Resolve relative child paths against their parent before indexing
+			// them so lookups use the same path form as the link destination.
+			if (routePath === "*") continue;
+
+			const path = routePath === ""
+				? parentPath
+				: normalizePathname(
+					routePath.startsWith("/")
+						? routePath
+						: parentPath === "/"
+							? `/${routePath}`
+							: `${parentPath}/${routePath}`,
+				);
+
+			parentPath = path;
 
 			if (activeMap[path] !== true) {
 				activeMap[path] = true;
