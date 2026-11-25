@@ -483,8 +483,25 @@ describe("createRouter navigation", () => {
 		await router.ready;
 
 		expect(router.isActive("/dashboard")).toBe(true);
+		expect(router.isActive("/dashboard/settings")).toBe(true);
 		expect(router.isActive("/dashboard/settings", true)).toBe(true);
 		expect(router.isActive("/dashboard", true)).toBe(false);
 		expect(router.isActive("/dashboard-old")).toBe(false);
+
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const App = createComponent({
+			name: "App",
+			template: () => `<nav>${router.Link(
+				{ to: "/dashboard/settings" },
+				`<a @class="isActive=>'active'">Settings</a>`,
+			)}</nav>`,
+		});
+		const app = render(App(), container);
+
+		expect(container.querySelector("a")?.classList.contains("active")).toBe(true);
+
+		app?.unmount?.();
+		container.remove();
 	});
 });

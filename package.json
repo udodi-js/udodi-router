@@ -1,6 +1,6 @@
 {
   "name": "udodi-router",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Optional, lightweight router for Udodi applications with client navigation and server-side metadata support for SEO",
   "keywords": [
     "udodi",
